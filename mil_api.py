@@ -1,15 +1,13 @@
-# ...existing code...
 import ctypes
 import platform
 import threading
 import time
-# import json # No longer needed
-import struct # Added for float/double reinterpretation
-from typing import Optional, Union # Union for type hints
+from enum import IntEnum
+import struct
+from typing import Optional, Union
 import os
 
 # --- API Configuration ---
-# Update this with the actual name of your compiled library
 LIB_NAME = "milconnapi.dll" if platform.system() == "Windows" else "libmilconnapi.so"
 
 class ApiError(Exception):
@@ -25,10 +23,12 @@ class SendError(Exception):
     pass
 
 # --- CTYPES STRUCTURES ---
-# These classes must exactly mirror the C++ structs in CNCMessageStructs.h
-
-
-
+class VarType(IntEnum):
+    BOOL = 0
+    BYTE = 1
+    WORD = 2
+    DWORD = 3
+    LWORD = 4
 
 # This class loads the DLL and defines the function signatures.
 class _C_API:
@@ -55,16 +55,30 @@ class _C_API:
         # --- Message Processing ---
         self.lib.process_messages.argtypes = [ctypes.c_void_p]
 
+        # --- Value Requesting ---
+        # <<< FIX 1: Added the missing signature for request_value. This is the main fix for the crash.
+        # The third argument is an enum, which is an `int` in C.
+        self.lib.request_value.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int]
+        # Assuming it returns void or you don't care about the return value. If it returns a status, add:
+        # self.lib.request_value.restype = ctypes.c_bool
 
         # --- Data Getters ---
-
-        # self.lib.get_io_status.argtypes = [ctypes.c_void_p, ctypes.POINTER(IOStatus)]
-        
         self.lib.get_bool_value.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_bool)]
         self.lib.get_bool_value.restype = ctypes.c_bool
+        
+        # <<< FIX 2: Added missing signatures for other getter functions to prevent future errors.
+        self.lib.get_byte_value.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint8)]
+        self.lib.get_byte_value.restype = ctypes.c_bool
+        
+        self.lib.get_word_value.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint16)]
+        self.lib.get_word_value.restype = ctypes.c_bool
+
         self.lib.get_dword_value.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32)]
         self.lib.get_dword_value.restype = ctypes.c_bool
-        
+
+        self.lib.get_lword_value.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint64)]
+        self.lib.get_lword_value.restype = ctypes.c_bool
+
         # --- Data Setters (for UserDefined... messages) ---
         self.lib.set_bool_value.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_bool]
         self.lib.set_bool_value.restype = ctypes.c_bool
@@ -83,15 +97,8 @@ class _C_API:
 
 # --- Main Python Client Class ---
 class Client:
-    """
-    A Python client for the MILTEKSAN CNC v2 API.
-    This client operates asynchronously, using a background thread
-    to process incoming messages from the server.
-    """
     def __init__(self, lib_path: str = LIB_NAME):
-        # Try to find the library relative to this script file
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        # Check if lib_path is absolute, if not, join with script_dir
         if not os.path.isabs(lib_path):
             lib_path = os.path.join(script_dir, lib_path)
             
@@ -100,96 +107,81 @@ class Client:
         if not self.client_handle:
             raise ApiError("Failed to create client instance from library.")
         
-        self._is_connected_flag = False # Internal flag, distinct from C is_connected
+        self._is_connected_flag = False
         self._processing_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
-        self._lock = threading.Lock() # Protects client_handle and _is_connected_flag
+        self._lock = threading.Lock()
         print("INFO: Client instance created.")
 
-
     def connect(self, host: str, port: int, timeout: int = 5):
-        """
-        Initiates a connection to the server and starts a background
-        thread to process messages.
-        """
         if self._is_connected_flag:
             print("WARN: Already connected.")
             return
 
         with self._lock:
-            if self._is_connected_flag: # Double check after acquiring lock
+            if self._is_connected_flag:
                 print("WARN: Already connected (race condition avoided).")
                 return
 
-            # The C++ function starts the connection attempt
-            # connect_to_server itself might be asynchronous in C++
             self._api.lib.connect_to_server(self.client_handle, host.encode('utf-8'), port)
 
-            # Start the background message processor
             self._stop_event.clear()
             self._processing_thread = threading.Thread(target=self._message_processor)
-            self._processing_thread.daemon = True # Allow program to exit even if thread is running
+            self._processing_thread.daemon = True
             self._processing_thread.start()
 
-            # Wait for the connection to be confirmed by is_connected
             start_time = time.time()
             while not self._api.lib.is_connected(self.client_handle):
                 if time.time() - start_time > timeout:
-                    # Attempt to clean up if connection timed out
                     self._stop_event.set()
                     if self._processing_thread and self._processing_thread.is_alive():
                         self._processing_thread.join(timeout=1.0)
-                    # No destroy_client here as disconnect() handles it.
-                    # We don't call full disconnect as client_handle might be in a weird state.
                     raise ConnectionError(f"Connection to {host}:{port} timed out after {timeout} seconds.")
-                if self._stop_event.is_set(): # If disconnect called from another thread
+                if self._stop_event.is_set():
                     raise ConnectionError("Connection attempt aborted.")
                 time.sleep(0.1)
             
             self._is_connected_flag = True
             print(f"INFO: Successfully connected to {host}:{port} and message processor started.")
 
-
     def _message_processor(self):
-        """Target for the background thread. Continuously polls the C++ library."""
         print("INFO: Message processing thread started.")
         while not self._stop_event.is_set():
-            if self.client_handle:
-                self._api.lib.process_messages(self.client_handle)
-            time.sleep(0.01) # 10ms loop, adjust as needed
+            with self._lock:
+                if self.client_handle:
+                    self._api.lib.process_messages(self.client_handle)
+            time.sleep(0.01)
         print("INFO: Message processing thread stopped.")
 
     def disconnect(self):
-        """Disconnects from the server and cleans up resources."""
-        if not self.client_handle:
+        if not self.client_handle and not self._is_connected_flag:
             return
 
         print("INFO: Disconnecting...")
-        self._stop_event.set() # Signal thread to stop
+        self._stop_event.set()
         if self._processing_thread and self._processing_thread.is_alive():
-            self._processing_thread.join(timeout=2.0) # Wait for thread to finish
+            self._processing_thread.join(timeout=2.0)
 
         with self._lock:
-            if not self.client_handle: return # Check again in case of race condition
-            self._api.lib.disconnect_from_server(self.client_handle)
+            if not self.client_handle: return
+            if self._api.lib.is_connected(self.client_handle):
+                self._api.lib.disconnect_from_server(self.client_handle)
             self._api.lib.destroy_client(self.client_handle)
             self.client_handle = None
-            self._is_connected = False
+            self._is_connected_flag = False # <<< FIX 3: Corrected the variable name from self._is_connected
         
         print("INFO: Client disconnected and destroyed.")
         
     def is_connected(self) -> bool:
-        """Checks if the client believes it is connected."""
-        # Check both Python flag and C-layer, prioritizing Python flag if recently disconnected
         with self._lock:
             if not self.client_handle or not self._is_connected_flag:
                 return False
-            # If Python flag is true, re-verify with C-layer
-            self._is_connected_flag = self._api.lib.is_connected(self.client_handle)
+            # Re-verify with C-layer to catch unexpected disconnects
+            if not self._api.lib.is_connected(self.client_handle):
+                self._is_connected_flag = False
             return self._is_connected_flag
     
     def set_plc_bool(self, address: int, value: bool):
-        """Sets a boolean value in the PLC's shared memory via UserDefinedBool message."""
         if not self.is_connected(): raise ConnectionError("Not connected.")
         if not isinstance(value, bool): raise TypeError("Value must be a boolean.")
         
@@ -197,12 +189,12 @@ class Client:
             if not self.client_handle: raise ConnectionError("Client handle destroyed.")
             success = self._api.lib.set_bool_value(self.client_handle, ctypes.c_uint32(address), ctypes.c_bool(value))
         if not success:
-            if not self._api.lib.is_connected(self.client_handle): self._is_connected_flag = False
+            self.is_connected() # Update internal connection flag
             raise SendError(f"Failed to set boolean value at address {address}.")
         print(f"INFO: set_plc_bool(address={address}, value={value}) sent.")
 
+    # ... Other set_plc_* methods remain the same ...
     def set_plc_byte(self, address: int, value: int):
-        """Sets a byte value (0-255) in the PLC's shared memory."""
         if not self.is_connected(): raise ConnectionError("Not connected.")
         if not (0 <= value <= 255): raise ValueError("Byte value must be between 0 and 255.")
 
@@ -210,12 +202,11 @@ class Client:
             if not self.client_handle: raise ConnectionError("Client handle destroyed.")
             success = self._api.lib.set_byte_value(self.client_handle, ctypes.c_uint32(address), ctypes.c_uint8(value))
         if not success:
-            if not self._api.lib.is_connected(self.client_handle): self._is_connected_flag = False
+            self.is_connected()
             raise SendError(f"Failed to set byte value at address {address}.")
         print(f"INFO: set_plc_byte(address={address}, value={value}) sent.")
 
     def set_plc_word(self, address: int, value: int):
-        """Sets a word value (0-65535) in the PLC's shared memory."""
         if not self.is_connected(): raise ConnectionError("Not connected.")
         if not (0 <= value <= 65535): raise ValueError("Word value must be between 0 and 65535.")
         
@@ -223,26 +214,17 @@ class Client:
             if not self.client_handle: raise ConnectionError("Client handle destroyed.")
             success = self._api.lib.set_word_value(self.client_handle, ctypes.c_uint32(address), ctypes.c_uint16(value))
         if not success:
-            if not self._api.lib.is_connected(self.client_handle): self._is_connected_flag = False
+            self.is_connected()
             raise SendError(f"Failed to set word value at address {address}.")
         print(f"INFO: set_plc_word(address={address}, value={value}) sent.")
 
     def set_plc_dword(self, address: int, value: Union[int, float]):
-        """
-        Sets a dword value in the PLC's shared memory.
-        If 'value' is an int, it's treated as a uint32_t (0 to 4294967295).
-        If 'value' is a float, its 32-bit IEEE 754 representation is
-        reinterpreted as a uint32_t and sent.
-        """
         if not self.is_connected(): raise ConnectionError("Not connected.")
 
         actual_uint32_value: int
         if isinstance(value, float):
-            # Reinterpret float bits as uint32
-            # 'f' is for C float (typically 32-bit), 'I' is for C unsigned int (typically 32-bit)
             packed_float = struct.pack('f', value)
             actual_uint32_value = struct.unpack('I', packed_float)[0]
-            print(f"INFO: Reinterpreting float {value} as uint32_t: {actual_uint32_value} (0x{actual_uint32_value:08X}) for address {address}")
         elif isinstance(value, int):
             if not (0 <= value <= 4294967295):
                 raise ValueError("Integer DWord value must be between 0 and 4294967295.")
@@ -254,26 +236,17 @@ class Client:
             if not self.client_handle: raise ConnectionError("Client handle destroyed.")
             success = self._api.lib.set_dword_value(self.client_handle, ctypes.c_uint32(address), ctypes.c_uint32(actual_uint32_value))
         if not success:
-            if not self._api.lib.is_connected(self.client_handle): self._is_connected_flag = False
+            self.is_connected()
             raise SendError(f"Failed to set dword value at address {address}.")
         print(f"INFO: set_plc_dword(address={address}, value={value} -> uint32:{actual_uint32_value}) sent.")
 
     def set_plc_lword(self, address: int, value: Union[int, float]):
-        """
-        Sets an lword value in the PLC's shared memory.
-        If 'value' is an int, it's treated as a uint64_t (0 to 2^64-1).
-        If 'value' is a float (Python float is typically a C double), its 64-bit
-        IEEE 754 representation is reinterpreted as a uint64_t and sent.
-        """
         if not self.is_connected(): raise ConnectionError("Not connected.")
 
         actual_uint64_value: int
         if isinstance(value, float):
-            # Reinterpret double (Python float) bits as uint64
-            # 'd' is for C double (typically 64-bit), 'Q' is for C unsigned long long (typically 64-bit)
             packed_double = struct.pack('d', value)
             actual_uint64_value = struct.unpack('Q', packed_double)[0]
-            print(f"INFO: Reinterpreting float (double) {value} as uint64_t: {actual_uint64_value} (0x{actual_uint64_value:016X}) for address {address}")
         elif isinstance(value, int):
             if not (0 <= value <= (2**64 - 1)):
                 raise ValueError("Integer LWord value out of range for uint64.")
@@ -285,80 +258,72 @@ class Client:
             if not self.client_handle: raise ConnectionError("Client handle destroyed.")
             success = self._api.lib.set_lword_value(self.client_handle, ctypes.c_uint32(address), ctypes.c_uint64(actual_uint64_value))
         if not success:
-            if not self._api.lib.is_connected(self.client_handle): self._is_connected_flag = False
+            self.is_connected()
             raise SendError(f"Failed to set lword value at address {address}.")
         print(f"INFO: set_plc_lword(address={address}, value={value} -> uint64:{actual_uint64_value}) sent.")
+    # ... Other set_plc_* methods end ...
 
-    def request_plc_value(self, address: int, var_type: str) -> Union[bool, int, float]:
-        """
-        Requests a value from the PLC's shared memory.
-        'var_type' can be 'bool', 'byte', 'word', 'dword', or 'lword'.
-        Returns the requested value, or raises an error if the request fails.
-        """
-        if not self.is_connected(): raise ConnectionError("Not connected.")
+    def request_plc_value(self, address: int, var_type_str: str):
+        if not self.is_connected():
+            raise ConnectionError("Not connected.")
+        
+        try:
+            var_enum = VarType[var_type_str.upper()]
+        except KeyError:
+            raise ValueError(f"Invalid variable type string: {var_type_str}")
         
         with self._lock:
             if not self.client_handle: raise ConnectionError("Client handle destroyed.")
+            # This call is now safe because its signature is defined.
+            self._api.lib.request_value(self.client_handle, ctypes.c_uint32(address), var_enum)
 
-            if var_type == 'bool':
-                var_enum = 0
-                self._api.lib.request_value(self.client_handle, ctypes.c_uint32(address), var_enum)
-            elif var_type == 'byte':
-                var_enum = 1
-                self._api.lib.request_value(self.client_handle, ctypes.c_uint32(address), var_enum)
-            elif var_type == 'word':
-                var_enum = 2
-                self._api.lib.request_value(self.client_handle, ctypes.c_uint32(address), var_enum)
-            elif var_type == 'dword':
-                var_enum = 3
-                self._api.lib.request_value(self.client_handle, ctypes.c_uint32(address), var_enum)
-            elif var_type == 'lword':
-                var_enum = 4
-                self._api.lib.request_value(self.client_handle, ctypes.c_uint32(address), var_enum)
-            else:
-                raise ValueError(f"Invalid var_type '{var_type}'. Must be one of: 'bool', 'byte', 'word', 'dword', 'lword'.")
-
-
+    # --- Getter Methods ---
     def get_bool_value(self, address: int) -> bool:
         """Gets a boolean value from the PLC's shared memory."""
+        if not self.is_connected(): raise ConnectionError("Not connected.")
         bool_value = ctypes.c_bool()
-        if self.get_bool_value(address, bool_value):
+        # <<< FIX 4: Corrected the recursive call to call the C API function
+        if self._api.lib.get_bool_value(self.client_handle, ctypes.c_uint32(address), ctypes.byref(bool_value)):
             return bool_value.value
         else:
+            self.is_connected() # Update internal connection status
             raise ApiError(f"Failed to get boolean value at address {address}.")
 
     def get_byte_value(self, address: int) -> int:
-        """Gets a byte value (0-255) from the PLC's shared memory."""
+        if not self.is_connected(): raise ConnectionError("Not connected.")
         byte_value = ctypes.c_uint8()
         if self._api.lib.get_byte_value(self.client_handle, ctypes.c_uint32(address), ctypes.byref(byte_value)):
             return byte_value.value
         else:
+            self.is_connected()
             raise ApiError(f"Failed to get byte value at address {address}.")
 
     def get_word_value(self, address: int) -> int:
-        """Gets a word value (0-65535) from the PLC's shared memory."""
+        if not self.is_connected(): raise ConnectionError("Not connected.")
         word_value = ctypes.c_uint16()
         if self._api.lib.get_word_value(self.client_handle, ctypes.c_uint32(address), ctypes.byref(word_value)):
             return word_value.value
         else:
+            self.is_connected()
             raise ApiError(f"Failed to get word value at address {address}.")
 
     def get_dword_value(self, address: int) -> int:
-        """Gets a dword value (0-4294967295) from the PLC's shared memory."""
+        if not self.is_connected(): raise ConnectionError("Not connected.")
         dword_value = ctypes.c_uint32()
         if self._api.lib.get_dword_value(self.client_handle, ctypes.c_uint32(address), ctypes.byref(dword_value)):
             return dword_value.value
         else:
+            self.is_connected()
             raise ApiError(f"Failed to get dword value at address {address}.")
         
     def get_lword_value(self, address: int) -> int:
-        """Gets an lword value (0 to 2^64-1) from the PLC's shared memory."""
+        if not self.is_connected(): raise ConnectionError("Not connected.")
         lword_value = ctypes.c_uint64()
         if self._api.lib.get_lword_value(self.client_handle, ctypes.c_uint32(address), ctypes.byref(lword_value)):
             return lword_value.value
         else:
+            self.is_connected()
             raise ApiError(f"Failed to get lword value at address {address}.")
-
 
     def __enter__(self):
         return self
@@ -367,7 +332,9 @@ class Client:
         self.disconnect()
 
     def __del__(self):
+        # The __del__ method is a fallback. The `with` statement is more reliable.
         if hasattr(self, 'client_handle') and self.client_handle:
-            self.disconnect()
-
-
+            # We must check if the thread is alive because in some shutdown scenarios
+            # the threading module might already be cleaned up.
+            if self._stop_event and self._processing_thread and self._processing_thread.is_alive():
+                self.disconnect()
