@@ -1,8 +1,5 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-import threading
-import time
-import queue
 
 # --- Import API Client ---
 try:
@@ -20,17 +17,22 @@ except (ImportError, OSError) as e:
 
 
 class MilConnApp:
-    """A Tkinter GUI for controlling Start, Pause, Reset, Edit, and Auto BOOLs."""
+    """A Tkinter GUI for controlling Start, Pause, Reset, Edit, Auto with press/release,
+    plus an ON/OFF toggle button for address 85."""
+    
     def __init__(self, root):
         self.root = root
-        self.root.title("MilConnAPI BOOL Controls")
-        self.root.geometry("400x200")
+        self.root.title("MilConnAPI Controls")
+        self.root.geometry("500x220")
 
         self.client: Client | None = None
         self.is_connected = False
         self.host_var = tk.StringVar(value="192.168.1.254")
         self.port_var = tk.StringVar(value="60000")
         self.status_var = tk.StringVar(value="🔌 Disconnected")
+
+        # Toggle state for address 85
+        self.toggle_state_85 = False
 
         self._create_widgets()
         self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
@@ -50,9 +52,9 @@ class MilConnApp:
         self.connect_btn = ttk.Button(conn_frame, text="Connect", command=self._toggle_connection)
         self.connect_btn.grid(row=0, column=4, padx=5)
 
-        # Special BOOL Buttons
-        btn_frame = ttk.LabelFrame(main_frame, text="BOOL Controls", padding=10)
-        btn_frame.pack(fill=tk.BOTH, expand=True)
+        # Press/Release BOOL Buttons
+        btn_frame = ttk.LabelFrame(main_frame, text="BOOL Controls (Press/Release)", padding=10)
+        btn_frame.pack(fill=tk.X, pady=(0, 10))
 
         special_buttons = [
             ("Start", 80),
@@ -67,6 +69,12 @@ class MilConnApp:
             btn.bind("<ButtonPress>", lambda e, a=addr: self._special_button_press(a))
             btn.bind("<ButtonRelease>", lambda e, a=addr: self._special_button_release(a))
             btn_frame.columnconfigure(i, weight=1)
+
+        # Toggle Button for address 85
+        toggle_frame = ttk.LabelFrame(main_frame, text="Toggle Control", padding=10)
+        toggle_frame.pack(fill=tk.X, pady=(0, 10))
+        self.toggle_btn = ttk.Button(toggle_frame, text="ON/OFF [OFF]", command=self._toggle_85)
+        self.toggle_btn.pack(fill=tk.X, padx=5)
 
         # Status Bar
         status_bar = ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W, padding=5)
@@ -128,15 +136,30 @@ class MilConnApp:
         except (ApiError, SendError) as e:
             messagebox.showerror("Send Error", f"Failed to send BOOL {address} = False.\n\n{e}")
 
+    def _toggle_85(self):
+        """Toggle BOOL at address 85."""
+        if not self.is_connected or not self.client:
+            messagebox.showwarning("Not Connected", "Connect to the PLC first.")
+            return
+
+        try:
+            self.toggle_state_85 = not self.toggle_state_85
+            self.client.set_plc_bool(85, self.toggle_state_85)
+            state_str = "ON" if self.toggle_state_85 else "OFF"
+            self.toggle_btn.config(text=f"ON/OFF [{state_str}]")
+            self.status_var.set(f"✅ BOOL 85 set to {self.toggle_state_85}")
+        except (ApiError, SendError) as e:
+            messagebox.showerror("Send Error", f"Failed to toggle BOOL 85.\n\n{e}")
+
     def _update_ui_state(self):
         """Enable or disable controls depending on connection status."""
         state = tk.NORMAL if self.is_connected else tk.DISABLED
         self.connect_btn.config(text="Disconnect" if self.is_connected else "Connect")
-
         for child in self.root.winfo_children():
             if isinstance(child, ttk.LabelFrame) and "BOOL Controls" in str(child.cget("text")):
                 for btn in child.winfo_children():
                     btn.config(state=state)
+        self.toggle_btn.config(state=state)
 
     def _on_closing(self):
         self._disconnect()
