@@ -57,11 +57,11 @@ class MilConnApp:
         btn_frame.pack(fill=tk.X, pady=(0, 10))
 
         special_buttons = [
-            ("Start", 80),
-            ("Pause", 81),
-            ("Reset", 82),
-            ("Edit", 83),
-            ("Auto", 84),
+            ("Start", 82),
+            ("Pause", 83),
+            ("Reset", 84),
+            ("Edit", 80),
+            ("Auto", 81),
         ]
         for i, (label, addr) in enumerate(special_buttons):
             btn = ttk.Button(btn_frame, text=label)
