@@ -27,7 +27,7 @@ class MilConnApp:
 
         self.client: Client | None = None
         self.is_connected = False
-        self.host_var = tk.StringVar(value="192.168.1.254")
+        self.host_var = tk.StringVar(value="127.0.0.1")
         self.port_var = tk.StringVar(value="60000")
         self.status_var = tk.StringVar(value="🔌 Disconnected")
 
@@ -57,11 +57,14 @@ class MilConnApp:
         btn_frame.pack(fill=tk.X, pady=(0, 10))
 
         special_buttons = [
-            ("Start", 82),
-            ("Pause", 83),
-            ("Reset", 84),
+            ("Start", 86),
+            ("Pause", 87),
+            ("Reset", 88),
+            ("LOAD", 89),
             ("Edit", 80),
             ("Auto", 81),
+            ("JOG", 82),
+            ("MDI", 83)
         ]
         for i, (label, addr) in enumerate(special_buttons):
             btn = ttk.Button(btn_frame, text=label)
@@ -144,7 +147,7 @@ class MilConnApp:
 
         try:
             self.toggle_state_85 = not self.toggle_state_85
-            self.client.set_plc_bool(85, self.toggle_state_85)
+            self.client.set_plc_bool(90, self.toggle_state_85)
             state_str = "ON" if self.toggle_state_85 else "OFF"
             self.toggle_btn.config(text=f"ON/OFF [{state_str}]")
             self.status_var.set(f"✅ BOOL 85 set to {self.toggle_state_85}")
