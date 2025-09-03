@@ -80,7 +80,12 @@ class _C_API:
         
         self.lib.set_lword_value.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint64]
         self.lib.set_lword_value.restype = ctypes.c_bool
-
+        
+        self.BoolCameFromServer = ctypes.c_bool.in_dll(self.lib, "BoolCameFromServer")
+        self.ByteCameFromServer = ctypes.c_bool.in_dll(self.lib, "ByteCameFromServer")
+        self.WordCameFromServer = ctypes.c_bool.in_dll(self.lib, "WordCameFromServer")
+        self.DWordCameFromServer = ctypes.c_bool.in_dll(self.lib, "DWordCameFromServer")
+        self.LWordCameFromServer = ctypes.c_bool.in_dll(self.lib, "LWordCameFromServer")
 # --- Main Python Client Class ---
 class Client:
     """
@@ -135,7 +140,7 @@ class Client:
             start_time = time.time()
             while not self._api.lib.is_connected(self.client_handle):
                 if time.time() - start_time > timeout:
-                    # Attempt to clean up if connection timed out
+                    print(f"ERROR: Connection to {host}:{port} timed out after {timeout} seconds.")
                     self._stop_event.set()
                     if self._processing_thread and self._processing_thread.is_alive():
                         self._processing_thread.join(timeout=1.0)
@@ -324,38 +329,54 @@ class Client:
         'var_type' can be 'bool', 'byte', 'word', 'dword', or 'lword'.
         Returns the requested value, or raises an error if the request times out.
         """
-        if not self.is_connected(): raise ConnectionError("Not connected.")
+        if not self.is_connected(): 
+            raise ConnectionError("Not connected.")
+        
         self.request_plc_value(address, var_type)
         
         start_time = time.time()
         while True:
             try:
+                if time.time() - start_time > timeout:
+                    raise ApiError(f"Timeout waiting for value at address {address} of type '{var_type}'")
+                    
                 if var_type == 'bool':
-                    if self._api.lib.BoolCameFromServer:
-                        self._api.lib.BoolCameFromServer = False
-                        return self._api.lib.get_bool_value(self.client_handle, ctypes.c_uint32(address), ctypes.byref(ctypes.c_bool()))
+                    if self._api.BoolCameFromServer.value:
+                        result = ctypes.c_bool()
+                        if self._api.lib.get_bool_value(self.client_handle, ctypes.c_uint32(address), ctypes.byref(result)):
+                            self._api.BoolCameFromServer.value = False
+                            return result.value
                 elif var_type == 'byte':
-                    if self._api.lib.ByteCameFromServer:
-                        self._api.lib.ByteCameFromServer = False
-                        return self._api.lib.get_byte_value(self.client_handle, ctypes.c_uint32(address), ctypes.byref(ctypes.c_uint8()))
+                    if self._api.ByteCameFromServer.value:
+                        result = ctypes.c_uint8()
+                        if self._api.lib.get_byte_value(self.client_handle, ctypes.c_uint32(address), ctypes.byref(result)):
+                            self._api.ByteCameFromServer.value = False
+                            return result.value
                 elif var_type == 'word':
-                    if self._api.lib.WordCameFromServer:
-                        self._api.lib.WordCameFromServer = False
-                        return self._api.lib.get_word_value(self.client_handle, ctypes.c_uint32(address), ctypes.byref(ctypes.c_uint16()))
+                    if self._api.WordCameFromServer.value:
+                        result = ctypes.c_uint16()
+                        if self._api.lib.get_word_value(self.client_handle, ctypes.c_uint32(address), ctypes.byref(result)):
+                            self._api.WordCameFromServer.value = False
+                            return result.value
                 elif var_type == 'dword':
-                    if self._api.lib.DWordCameFromServer:
-                        self._api.lib.DWordCameFromServer = False
-                        return self._api.lib.get_dword_value(self.client_handle, ctypes.c_uint32(address), ctypes.byref(ctypes.c_uint32()))
+                    if self._api.DWordCameFromServer.value:
+                        result = ctypes.c_uint32()
+                        if self._api.lib.get_dword_value(self.client_handle, ctypes.c_uint32(address), ctypes.byref(result)):
+                            self._api.DWordCameFromServer.value = False
+                            return result.value
                 elif var_type == 'lword':
-                    if self._api.lib.LWordCameFromServer:
-                        self._api.lib.LWordCameFromServer = False
-                        return self._api.lib.get_lword_value(self.client_handle, ctypes.c_uint32(address), ctypes.byref(ctypes.c_uint64()))
+                    if self._api.LWordCameFromServer.value:
+                        result = ctypes.c_uint64()
+                        if self._api.lib.get_lword_value(self.client_handle, ctypes.c_uint32(address), ctypes.byref(result)):
+                            self._api.LWordCameFromServer.value = False
+                            return result.value
                 else:
                     raise ValueError(f"Invalid var_type '{var_type}'. Must be one of: 'bool', 'byte', 'word', 'dword', 'lword'.")
-            except ApiError as e:
-                if time.time() - start_time > timeout:
-                    raise ApiError(f"Timeout waiting for value at address {address} of type '{var_type}'. Error: {e}")
-                time.sleep(0.1)
+                
+                time.sleep(0.01)  # Small sleep to prevent busy waiting
+                
+            except Exception as e:
+                raise ApiError(f"Error while waiting for value: {str(e)}")
     
     
     def get_bool_value(self, address: int) -> bool:
