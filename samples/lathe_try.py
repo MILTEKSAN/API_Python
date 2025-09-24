@@ -1,6 +1,8 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-
+import os 
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 # --- Import API Client ---
 try:
     from mil_api import Client, ApiError, ConnectionError, SendError
@@ -79,10 +81,38 @@ class MilConnApp:
         self.toggle_btn = ttk.Button(toggle_frame, text="ON/OFF [OFF]", command=self._toggle_85)
         self.toggle_btn.pack(fill=tk.X, padx=5)
 
+        # --- NEW SLIDER FRAME ---
+        slider_frame = ttk.LabelFrame(main_frame, text="Analog Controls (Sliders)", padding=10)
+        slider_frame.pack(fill=tk.X, pady=(0, 10))
+
+        self.slider1 = tk.DoubleVar(value=1.0)
+        self.slider2 = tk.DoubleVar(value=1.0)
+
+        s1 = ttk.Scale(slider_frame, from_=0.0, to=1.5,
+                       variable=self.slider1, command=lambda v: self._slider_changed(100, self.slider1))
+        s1.pack(fill=tk.X, padx=5, pady=5)
+
+        s2 = ttk.Scale(slider_frame, from_=0.0, to=1.5,
+                       variable=self.slider2, command=lambda v: self._slider_changed(101, self.slider2))
+        s2.pack(fill=tk.X, padx=5, pady=5)
+
         # Status Bar
         status_bar = ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W, padding=5)
         status_bar.pack(side=tk.BOTTOM, fill=tk.X)
         self._update_ui_state()
+
+    def _slider_changed(self, address: int, var: tk.DoubleVar):
+        """Send slider value as LOWRD double to given PLC address."""
+        if not self.is_connected or not self.client:
+            return
+        value = float(var.get())
+        try:
+            # LOWRD → analog yazım
+            self.client.set_plc_lword(address, value)
+            self.status_var.set(f"✅ LWORD {address} = {value:.2f}")
+        except (ApiError, SendError) as e:
+            messagebox.showerror("Send Error", f"Failed to send LWORD {address} = {value}\n\n{e}")
+
 
     def _toggle_connection(self):
         if self.is_connected:
@@ -158,11 +188,20 @@ class MilConnApp:
         """Enable or disable controls depending on connection status."""
         state = tk.NORMAL if self.is_connected else tk.DISABLED
         self.connect_btn.config(text="Disconnect" if self.is_connected else "Connect")
+
         for child in self.root.winfo_children():
             if isinstance(child, ttk.LabelFrame) and "BOOL Controls" in str(child.cget("text")):
                 for btn in child.winfo_children():
                     btn.config(state=state)
         self.toggle_btn.config(state=state)
+
+        # --- send init values when connected ---
+        if self.is_connected and self.client:
+            try:
+                self._slider_changed(100, self.slider1)
+                self._slider_changed(101, self.slider2)
+            except Exception:
+                pass
 
     def _on_closing(self):
         self._disconnect()
