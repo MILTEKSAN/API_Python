@@ -62,8 +62,14 @@ class _C_API:
         
         self.lib.get_bool_value.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_bool)]
         self.lib.get_bool_value.restype = ctypes.c_bool
+        self.lib.get_byte_value.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint8)]
+        self.lib.get_byte_value.restype = ctypes.c_bool
+        self.lib.get_word_value.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint16)]
+        self.lib.get_word_value.restype = ctypes.c_bool
         self.lib.get_dword_value.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32)]
         self.lib.get_dword_value.restype = ctypes.c_bool
+        self.lib.get_lword_value.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint64)]
+        self.lib.get_lword_value.restype = ctypes.c_bool
         
         # --- Data Setters (for UserDefined... messages) ---
         self.lib.set_bool_value.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_bool]
@@ -193,7 +199,7 @@ class Client:
             self._is_connected_flag = self._api.lib.is_connected(self.client_handle)
             return self._is_connected_flag
     
-    def set_plc_bool(self, address: int, value: bool):
+    def set_bool_value(self, address: int, value: bool):
         """Sets a boolean value in the PLC's shared memory via UserDefinedBool message."""
         if not self.is_connected(): raise ConnectionError("Not connected.")
         if not isinstance(value, bool): raise TypeError("Value must be a boolean.")
@@ -204,9 +210,9 @@ class Client:
         if not success:
             if not self._api.lib.is_connected(self.client_handle): self._is_connected_flag = False
             raise SendError(f"Failed to set boolean value at address {address}.")
-        print(f"INFO: set_plc_bool(address={address}, value={value}) sent.")
+        print(f"INFO: set_bool_value(address={address}, value={value}) sent.")
 
-    def set_plc_byte(self, address: int, value: int):
+    def set_byte_value(self, address: int, value: int):
         """Sets a byte value (0-255) in the PLC's shared memory."""
         if not self.is_connected(): raise ConnectionError("Not connected.")
         if not (0 <= value <= 255): raise ValueError("Byte value must be between 0 and 255.")
@@ -217,9 +223,9 @@ class Client:
         if not success:
             if not self._api.lib.is_connected(self.client_handle): self._is_connected_flag = False
             raise SendError(f"Failed to set byte value at address {address}.")
-        print(f"INFO: set_plc_byte(address={address}, value={value}) sent.")
+        print(f"INFO: set_byte_value(address={address}, value={value}) sent.")
 
-    def set_plc_word(self, address: int, value: int):
+    def set_word_value(self, address: int, value: int):
         """Sets a word value (0-65535) in the PLC's shared memory."""
         if not self.is_connected(): raise ConnectionError("Not connected.")
         if not (0 <= value <= 65535): raise ValueError("Word value must be between 0 and 65535.")
@@ -230,9 +236,9 @@ class Client:
         if not success:
             if not self._api.lib.is_connected(self.client_handle): self._is_connected_flag = False
             raise SendError(f"Failed to set word value at address {address}.")
-        print(f"INFO: set_plc_word(address={address}, value={value}) sent.")
+        print(f"INFO: set_word_value(address={address}, value={value}) sent.")
 
-    def set_plc_dword(self, address: int, value: Union[int, float]):
+    def set_dword_value(self, address: int, value: Union[int, float]):
         """
         Sets a dword value in the PLC's shared memory.
         If 'value' is an int, it's treated as a uint32_t (0 to 4294967295).
@@ -253,7 +259,7 @@ class Client:
                 raise ValueError("Integer DWord value must be between 0 and 4294967295.")
             actual_uint32_value = value
         else:
-            raise TypeError("Value for set_plc_dword must be an int or float.")
+            raise TypeError("Value for set_dword_value must be an int or float.")
 
         with self._lock:
             if not self.client_handle: raise ConnectionError("Client handle destroyed.")
@@ -261,9 +267,9 @@ class Client:
         if not success:
             if not self._api.lib.is_connected(self.client_handle): self._is_connected_flag = False
             raise SendError(f"Failed to set dword value at address {address}.")
-        print(f"INFO: set_plc_dword(address={address}, value={value} -> uint32:{actual_uint32_value}) sent.")
+        print(f"INFO: set_dword_value(address={address}, value={value} -> uint32:{actual_uint32_value}) sent.")
 
-    def set_plc_lword(self, address: int, value: Union[int, float]):
+    def set_lword_value(self, address: int, value: Union[int, float]):
         """
         Sets an lword value in the PLC's shared memory.
         If 'value' is an int, it's treated as a uint64_t (0 to 2^64-1).
@@ -284,7 +290,7 @@ class Client:
                 raise ValueError("Integer LWord value out of range for uint64.")
             actual_uint64_value = value
         else:
-            raise TypeError("Value for set_plc_lword must be an int or float.")
+            raise TypeError("Value for set_lword_value must be an int or float.")
 
         with self._lock:
             if not self.client_handle: raise ConnectionError("Client handle destroyed.")
@@ -292,7 +298,7 @@ class Client:
         if not success:
             if not self._api.lib.is_connected(self.client_handle): self._is_connected_flag = False
             raise SendError(f"Failed to set lword value at address {address}.")
-        print(f"INFO: set_plc_lword(address={address}, value={value} -> uint64:{actual_uint64_value}) sent.")
+        print(f"INFO: set_lword_value(address={address}, value={value} -> uint64:{actual_uint64_value}) sent.")
 
     def request_plc_value(self, address: int, var_type: str) -> Union[bool, int, float]:
         """
@@ -307,6 +313,7 @@ class Client:
 
             if var_type == 'bool':
                 var_enum = 0
+                print(f"INFO: Requesting BOOL value at address {address}")
                 self._api.lib.request_value(self.client_handle, ctypes.c_uint32(address), var_enum)
             elif var_type == 'byte':
                 var_enum = 1
