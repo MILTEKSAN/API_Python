@@ -313,7 +313,6 @@ class Client:
 
             if var_type == 'bool':
                 var_enum = 0
-                print(f"INFO: Requesting BOOL value at address {address}")
                 self._api.lib.request_value(self.client_handle, ctypes.c_uint32(address), var_enum)
             elif var_type == 'byte':
                 var_enum = 1
