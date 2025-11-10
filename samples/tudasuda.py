@@ -73,75 +73,124 @@ class MilConnApp:
         main_frame = ttk.Frame(self.root, padding=10)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # --- Top row: Connection + Power/Execute ---
+        # ------------------- TOP: Connection + POWER SIDE BY SIDE -------------------
         top = ttk.Frame(main_frame)
-        top.pack(fill=tk.X)
+        top.pack(fill=tk.X, pady=(0, 10))
 
         # Connection
         conn_frame = ttk.LabelFrame(top, text="Connection", padding=10)
-        conn_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
-        ttk.Label(conn_frame, text="Host:").grid(row=0, column=0, padx=5, sticky=tk.W)
-        ttk.Entry(conn_frame, textvariable=self.host_var, width=15).grid(row=0, column=1, padx=5)
-        ttk.Label(conn_frame, text="Port:").grid(row=0, column=2, padx=5, sticky=tk.W)
-        ttk.Entry(conn_frame, textvariable=self.port_var, width=8).grid(row=0, column=3, padx=5)
-        self.connect_btn = ttk.Button(conn_frame, text="Connect", command=self._toggle_connection)
-        self.connect_btn.grid(row=0, column=4, padx=5)
+        conn_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        # Power / Execute
-        power_frame = ttk.LabelFrame(top, text="Power / Execute Control", padding=10)
-        power_frame.pack(side=tk.LEFT, fill=tk.Y)
+        ttk.Label(conn_frame, text="Host:").grid(row=0, column=0, sticky=tk.W)
+        ttk.Entry(conn_frame, textvariable=self.host_var, width=14).grid(row=0, column=1, padx=4)
+
+        ttk.Label(conn_frame, text="Port:").grid(row=0, column=2, sticky=tk.W)
+        ttk.Entry(conn_frame, textvariable=self.port_var, width=7).grid(row=0, column=3, padx=4)
+
+        self.connect_btn = ttk.Button(conn_frame, text="Connect", command=self._toggle_connection)
+        self.connect_btn.grid(row=0, column=4, padx=6)
+
+        # POWER BUTTON + LED
+        power_frame = ttk.Frame(top)
+        power_frame.pack(side=tk.LEFT, padx=20)
 
         self.power_btn = ttk.Button(power_frame, text="Power OFF", command=self._toggle_power)
-        self.power_btn.grid(row=0, column=0, padx=5, pady=2, sticky=tk.W)
+        self.power_btn.pack(side=tk.LEFT)
 
         self.power_led = tk.Canvas(power_frame, width=20, height=20,
                                    highlightthickness=1, highlightbackground="gray")
-        self.power_led.grid(row=0, column=1, padx=10, pady=2)
-        self._update_led(self.power_feedback.get())
+        self.power_led.pack(side=tk.LEFT, padx=8)
+        self._update_led(False)
 
-        self.execute_btn = ttk.Button(power_frame, text="Execute")
-        self.execute_btn.grid(row=0, column=2, padx=20, pady=2, sticky=tk.W)
+
+        # =============================================================
+        # SECOND ROW: 3 COLUMNS (Params / Position / Execute)
+        # =============================================================
+
+        second_row = ttk.Frame(main_frame)
+        second_row.pack(fill=tk.X, pady=10)
+
+        # --------- Column 1 → MOTION PARAMS -----------
+        params_frame = ttk.LabelFrame(second_row, text="Motion Params", padding=10)
+        params_frame.pack(side=tk.LEFT, fill=tk.Y, expand=True, padx=5)
+
+        self.axis_var = tk.IntVar(value=1)
+        ttk.Label(params_frame, text="Axis:").grid(row=0, column=0, sticky=tk.W)
+        ttk.Entry(params_frame, textvariable=self.axis_var, width=6).grid(row=0, column=1)
+
+        ttk.Label(params_frame, text="Vel:").grid(row=1, column=0, sticky=tk.W)
+        ttk.Entry(params_frame, textvariable=self.vel_var, width=8).grid(row=1, column=1)
+
+        ttk.Label(params_frame, text="Acc:").grid(row=2, column=0, sticky=tk.W)
+        ttk.Entry(params_frame, textvariable=self.acc_var, width=8).grid(row=2, column=1)
+
+        ttk.Label(params_frame, text="Dec:").grid(row=3, column=0, sticky=tk.W)
+        ttk.Entry(params_frame, textvariable=self.dec_var, width=8).grid(row=3, column=1)
+
+        ttk.Label(params_frame, text="Jerk:").grid(row=4, column=0, sticky=tk.W)
+        ttk.Entry(params_frame, textvariable=self.jerk_var, width=8).grid(row=4, column=1)
+
+        ttk.Button(params_frame, text="Write Params", command=self._write_motion_params)\
+            .grid(row=5, column=0, columnspan=2, pady=5)
+
+
+        # --------- Column 2 → POSITION -----------
+        pos_frame = ttk.LabelFrame(second_row, text="Position", padding=10)
+        pos_frame.pack(side=tk.LEFT, fill=tk.Y, expand=True, padx=5)
+
+        ttk.Label(pos_frame, text="Target (mm):").grid(row=0, column=0, sticky=tk.W)
+        ttk.Entry(pos_frame, textvariable=self.position_var, width=8).grid(row=0, column=1, padx=5)
+
+        ttk.Button(pos_frame, text="Write Position", command=self._write_position)\
+            .grid(row=1, column=0, columnspan=2, pady=5)
+
+
+        # --------- Column 3 → EXECUTE -----------
+        exec_frame = ttk.LabelFrame(second_row, text="Execute", padding=10)
+        exec_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5)
+
+        # Existing Execute (Hold)
+        self.execute_btn = ttk.Button(exec_frame, text="Execute (Hold)")
+        self.execute_btn.pack(pady=5)
         self.execute_btn.bind("<ButtonPress>", lambda e: self._execute_press())
         self.execute_btn.bind("<ButtonRelease>", lambda e: self._execute_release())
 
-        # --- Position and Parameters ---
-        pos_frame = ttk.LabelFrame(main_frame, text="Motion Parameters", padding=10)
-        pos_frame.pack(fill=tk.X, pady=(10, 10))
+        # ✅ NEW: Velocity Forward (Hold)
+        self.exec_vel_fwd_btn = ttk.Button(exec_frame, text="Vel Forward")
+        self.exec_vel_fwd_btn.pack(pady=5)
+        self.exec_vel_fwd_btn.bind("<ButtonPress>", lambda e: self._vel_forward_press())
+        self.exec_vel_fwd_btn.bind("<ButtonRelease>", lambda e: self._vel_forward_release())
 
-        # Position
-        ttk.Label(pos_frame, text="Target Pos (mm):").grid(row=0, column=0, padx=5, sticky=tk.W)
-        ttk.Entry(pos_frame, textvariable=self.position_var, width=10).grid(row=0, column=1, padx=5)
-        ttk.Button(pos_frame, text="Write Pos", command=self._write_position).grid(row=0, column=2, padx=5)
+        # ✅ NEW: Velocity Backward (Hold)
+        self.exec_vel_bwd_btn = ttk.Button(exec_frame, text="Vel Backward")
+        self.exec_vel_bwd_btn.pack(pady=5)
+        self.exec_vel_bwd_btn.bind("<ButtonPress>", lambda e: self._vel_backward_press())
+        self.exec_vel_bwd_btn.bind("<ButtonRelease>", lambda e: self._vel_backward_release())
 
-        # Velocity, Acc, Dec, Jerk
-        ttk.Label(pos_frame, text="Vel (mm/s):").grid(row=1, column=0, padx=5, sticky=tk.W)
-        ttk.Entry(pos_frame, textvariable=self.vel_var, width=10).grid(row=1, column=1, padx=5)
+        # ✅ NEW: Halt (Single Click)
+        self.exec_halt_btn = ttk.Button(exec_frame, text="HALT")
+        self.exec_halt_btn.pack(pady=5)
+        self.exec_halt_btn.config(command=self._execute_halt)
 
-        ttk.Label(pos_frame, text="Acc (mm²/s):").grid(row=2, column=0, padx=5, sticky=tk.W)
-        ttk.Entry(pos_frame, textvariable=self.acc_var, width=10).grid(row=2, column=1, padx=5)
+        # --------- Feedback below second row ----------
+        feedback_frame = ttk.Frame(main_frame)
+        feedback_frame.pack(fill=tk.X, pady=5)
 
-        ttk.Label(pos_frame, text="Dec (mm²/s):").grid(row=3, column=0, padx=5, sticky=tk.W)
-        ttk.Entry(pos_frame, textvariable=self.dec_var, width=10).grid(row=3, column=1, padx=5)
+        ttk.Label(feedback_frame, text="Feedback Pos:").pack(side=tk.LEFT)
+        ttk.Label(feedback_frame, textvariable=self.feedback_var).pack(side=tk.LEFT, padx=10)
 
-        ttk.Label(pos_frame, text="Jerk (mm³/s):").grid(row=4, column=0, padx=5, sticky=tk.W)
-        ttk.Entry(pos_frame, textvariable=self.jerk_var, width=10).grid(row=4, column=1, padx=5)
 
-        ttk.Button(pos_frame, text="Write Params", command=self._write_motion_params).grid(row=5, column=0, columnspan=3, pady=5)
+        # --------- PLOT FRAME BELOW EVERYTHING ----------
+        self.plot_frame = ttk.LabelFrame(main_frame, text="Live Plot", padding=6)
+        self.plot_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 10))
 
-        # Feedback label
-        ttk.Label(pos_frame, text="Feedback Pos:").grid(row=6, column=0, padx=5, sticky=tk.W)
-        ttk.Label(pos_frame, textvariable=self.feedback_var, width=12).grid(row=6, column=1, padx=5, sticky=tk.W)
-
-        # --- Bottom: Live Plot ---
-        self.plot_frame = ttk.LabelFrame(main_frame, text="Live Plot (Time vs Position, last 200 samples)", padding=6)
-        self.plot_frame.pack(fill=tk.BOTH, expand=True)
-
-        # Status bar
+        # Status Bar
         status_bar = ttk.Label(self.root, textvariable=self.status_var,
                                relief=tk.SUNKEN, anchor=tk.W, padding=5)
         status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
         self._update_ui_state()
+
 
     # -------------------------------------------------------------------------
     def _init_plot(self):
@@ -203,6 +252,7 @@ class MilConnApp:
             messagebox.showwarning("Not Connected", "Connect first.")
             return
         try:
+            self.client.set_byte_value(0, int(self.axis_var.get()))
             self.client.set_lword_value(2, float(self.vel_var.get()))
             self.client.set_lword_value(3, float(self.acc_var.get()))
             self.client.set_lword_value(4, float(self.dec_var.get()))
@@ -210,6 +260,58 @@ class MilConnApp:
             self.status_var.set("✅ Motion params sent to 2,3,4,5")
         except Exception as e:
             messagebox.showerror("Send Error", f"Failed to send motion params.\n\n{e}")
+            
+    # --------- Velocity Forward (addr 7) ----------
+    def _vel_forward_press(self):
+        if not self.is_connected or not self.client:
+            return
+        try:
+            self.client.set_bool_value(7, True)
+            self.status_var.set("▶ Vel Forward = True (Pressed)")
+        except Exception as e:
+            self.status_var.set(f"Vel Forward press error: {e}")
+
+    def _vel_forward_release(self):
+        if not self.is_connected or not self.client:
+            return
+        try:
+            self.client.set_bool_value(7, False)
+            self.status_var.set("⏹ Vel Forward = False (Released)")
+        except Exception as e:
+            self.status_var.set(f"Vel Forward release error: {e}")
+
+
+    # --------- Velocity Backward (addr 8) ----------
+    def _vel_backward_press(self):
+        if not self.is_connected or not self.client:
+            return
+        try:
+            self.client.set_bool_value(8, True)
+            self.status_var.set("▶ Vel Backward = True (Pressed)")
+        except Exception as e:
+            self.status_var.set(f"Vel Backward press error: {e}")
+
+    def _vel_backward_release(self):
+        if not self.is_connected or not self.client:
+            return
+        try:
+            self.client.set_bool_value(8, False)
+            self.status_var.set("⏹ Vel Backward = False (Released)")
+        except Exception as e:
+            self.status_var.set(f"Vel Backward release error: {e}")
+
+
+    # --------- HALT (addr 9, one-shot) ----------
+    def _execute_halt(self):
+        if not self.is_connected or not self.client:
+            return
+        try:
+            self.client.set_bool_value(9, True)
+            time.sleep(0.1)
+            self.client.set_bool_value(9, False)
+            self.status_var.set("⛔ HALT triggered (pulse on addr 9)")
+        except Exception as e:
+            self.status_var.set(f"Halt error: {e}")
 
     # -------------------------------------------------------------------------
     def _toggle_power(self):
@@ -251,22 +353,34 @@ class MilConnApp:
         self.feedback_thread.start()
 
     def _feedback_loop(self):
-        """Read position feedback (LWORD as uint64->double) + power bool."""
+        """Read position feedback depending on selected axis."""
         while not self.stop_thread.is_set():
             if self.is_connected and self.client:
                 try:
-                    power_fb = self.client.get_bool_value(80)
-                    raw_val = self.client.get_lword_value(100)
+                    axis = int(self.axis_var.get())
+
+                    # Position address = 100 + axis
+                    pos_address = 100 + axis  
+
+                    raw_val = self.client.get_lword_value(pos_address)
                     pos = struct.unpack('d', struct.pack('Q', raw_val))[0]
                     formatted_pos = round(pos, 3)
+
                     t = time.time() - self.t0
                     with self.buf_lock:
                         self.time_buf.append(t)
                         self.pos_buf.append(formatted_pos)
+
+                    # Update GUI safely
                     self.root.after(0, self.feedback_var.set, formatted_pos)
+
+                    # Power status still on bool 80
+                    power_fb = self.client.get_bool_value(80)
                     self.root.after(0, self._update_led, power_fb)
+
                 except Exception as e:
                     self.root.after(0, self.status_var.set, f"Feedback error: {e}")
+
             time.sleep(0.1)
 
     # -------------------------------------------------------------------------
@@ -321,6 +435,9 @@ class MilConnApp:
         self.connect_btn.config(text="Disconnect" if self.is_connected else "Connect")
         self.power_btn.config(state=state)
         self.execute_btn.config(state=state)
+        self.exec_vel_fwd_btn.config(state=state)
+        self.exec_vel_bwd_btn.config(state=state)
+        self.exec_halt_btn.config(state=state)
         self.root.update_idletasks()
 
     def _on_closing(self):
