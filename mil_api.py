@@ -1,16 +1,30 @@
-# ...existing code...
 import ctypes
 import platform
 import threading
 import time
-# import json # No longer needed
-import struct # Added for float/double reinterpretation
-from typing import Optional, Union # Union for type hints
+import struct
+from typing import Optional, Union
 import os
 
-# --- API Configuration ---
-# Update this with the actual name of your compiled library
-LIB_NAME = "milconnapi.dll" if platform.system() == "Windows" else "libmilconnapi.so"
+# --- AUTO-DETECT PLATFORM AND ARCH ---
+SYSTEM = platform.system().lower()  # windows, linux, darwin
+ARCH = platform.machine().lower()    # x86_64, amd64, aarch64, arm64, etc.
+
+# Decide library filename based on OS + ARCH
+if SYSTEM == "windows":
+    LIB_NAME = "milpyx86_win.dll"
+elif SYSTEM == "linux":
+    if ARCH in ("x86_64", "amd64"):
+        LIB_NAME = "milpyx86_linux.so"          # Linux x86_64
+    elif ARCH in ("aarch64", "arm64"):
+        LIB_NAME = "milpyaarch64_linux.so"    # Linux ARM64 (optional different name)
+    else:
+        raise RuntimeError(f"Unsupported Linux architecture: {ARCH}")
+elif SYSTEM == "darwin":
+    # macOS
+    LIB_NAME = "libmilconnapi.dylib"
+else:
+    raise RuntimeError(f"Unsupported operating system: {SYSTEM}")
 
 class ApiError(Exception):
     """Base exception for API errors."""
