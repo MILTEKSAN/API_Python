@@ -43,7 +43,7 @@ class MilConnApp:
 
         self.position_var = tk.DoubleVar(value=0.0)
         self.feedback_var = tk.DoubleVar(value=0.0)
-        self.vel_var = tk.DoubleVar(value=10.0)
+        self.vel_var = tk.DoubleVar(value=0.0)
         self.acc_var = tk.DoubleVar(value=100.0)
         self.dec_var = tk.DoubleVar(value=100.0)
         self.jerk_var = tk.DoubleVar(value=1000.0)
@@ -108,7 +108,7 @@ class MilConnApp:
         params_frame = ttk.LabelFrame(second_row, text="Motion Params", padding=10)
         params_frame.pack(side=tk.LEFT, fill=tk.Y, expand=True, padx=5)
 
-        self.axis_var = tk.IntVar(value=1)
+        self.axis_var = tk.IntVar(value=0)
         ttk.Label(params_frame, text="Axis:").grid(row=0, column=0, sticky=tk.W)
         ttk.Entry(params_frame, textvariable=self.axis_var, width=6).grid(row=0, column=1)
 
@@ -138,7 +138,36 @@ class MilConnApp:
         ttk.Button(pos_frame, text="Write Position", command=self._write_position)\
             .grid(row=1, column=0, columnspan=2, pady=5)
 
+        # ✅ NEW BUTTONS: +Pol and -Pol (Hold action)
+        self.plus_pol_btn = ttk.Button(pos_frame, text="+ Pol")
+        self.plus_pol_btn.grid(row=2, column=0, pady=5, padx=4)
+        self.plus_pol_btn.bind("<ButtonPress>", lambda e: self._pol_press(1))
+        self.plus_pol_btn.bind("<ButtonRelease>", lambda e: self._pol_release())
 
+        self.minus_pol_btn = ttk.Button(pos_frame, text="- Pol")
+        self.minus_pol_btn.grid(row=2, column=1, pady=5, padx=4)
+        self.minus_pol_btn.bind("<ButtonPress>", lambda e: self._pol_press(-1))
+        self.minus_pol_btn.bind("<ButtonRelease>", lambda e: self._pol_release())
+
+        # -------- SLIDER FOR LIVE VELOCITY WRITE ----------
+        ttk.Label(params_frame, text="Live Vel:").grid(row=6, column=0, sticky=tk.W)
+
+        self.vel_slider_var = tk.DoubleVar(value=self.vel_var.get())
+        self.vel_slider = ttk.Scale(
+            params_frame,
+            from_=-30.0,
+            to=30.0,
+            orient=tk.HORIZONTAL,
+            variable=self.vel_slider_var,
+            command=self._slider_velocity_changed  # callback here
+        )
+        self.vel_slider.grid(row=6, column=1, padx=4, pady=4, sticky=tk.EW)
+
+        # Show live number next to slider
+        self.vel_slider_label = ttk.Label(params_frame, text="0.0")
+        self.vel_slider_label.grid(row=6, column=2, padx=4)
+        
+        
         # --------- Column 3 → EXECUTE -----------
         exec_frame = ttk.LabelFrame(second_row, text="Execute", padding=10)
         exec_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5)
@@ -165,7 +194,12 @@ class MilConnApp:
         self.exec_halt_btn = ttk.Button(exec_frame, text="HALT")
         self.exec_halt_btn.pack(pady=5)
         self.exec_halt_btn.config(command=self._execute_halt)
-
+        
+        # ✅ NEW: STOP (Toggle)
+        self.exec_stop_state = False
+        self.exec_stop_btn = ttk.Button(exec_frame, text="STOP (Off)", command=self._toggle_stop)
+        self.exec_stop_btn.pack(pady=5)
+        
         # --------- Feedback below second row ----------
         feedback_frame = ttk.Frame(main_frame)
         feedback_frame.pack(fill=tk.X, pady=5)
@@ -211,6 +245,28 @@ class MilConnApp:
             self.status_var.set(f"⏹ {name} (Addr {addr}) = False")
         except Exception as e:
             self.status_var.set(f"{name} release error: {e}")
+
+        # --- Polarity buttons logic ---
+    def _pol_press(self, byte_val):
+        """Send byte to addr 0 (128 or 0), then set bool addr 16 = True."""
+        if not self.is_connected or not self.client:
+            return
+        try:
+            self.client.set_lword_value(6, float(byte_val))       # 128 for +Pol, 0 for -Pol
+            self.client.set_bool_value(16, True)          # Hold = True
+            self.status_var.set(f"▶ Polarity {byte_val} (addr 0), Hold True (addr 16)")
+        except Exception as e:
+            self.status_var.set(f"Pol press error: {e}")
+
+    def _pol_release(self):
+        """Release: bool addr 16 = False"""
+        if not self.is_connected or not self.client:
+            return
+        try:
+            self.client.set_bool_value(16, False)
+            self.status_var.set("⏹ Polarity Hold False (addr 16)")
+        except Exception as e:
+            self.status_var.set(f"Pol release error: {e}")
 
     # -------------------------------------------------------------------------
     def _init_plot(self):
@@ -268,7 +324,19 @@ class MilConnApp:
         if self.client and self.is_connected:
             self.client.set_bool_value(1, False)
             self.status_var.set("⏹ Execute = False")
-
+            
+    # -------------------------------------------------------------------------
+    def _slider_velocity_changed(self, event=None):
+        if not self.is_connected or not self.client:
+            return
+        
+        try:
+            vel = float(self.vel_slider_var.get())
+            self.vel_slider_label.config(text=f"{vel:.2f}")
+            self.client.set_lword_value(2, vel)  # WRITE DIRECTLY
+            self.status_var.set(f"📡 Live Vel sent: {vel:.2f} (Addr 2)")
+        except Exception as e:
+            self.status_var.set(f"Slider send error: {e}")
     # -------------------------------------------------------------------------
     def _write_position(self):
         if not self.client or not self.is_connected:
@@ -341,7 +409,28 @@ class MilConnApp:
             self.status_var.set("⛔ HALT triggered (pulse on addr 9)")
         except Exception as e:
             self.status_var.set(f"Halt error: {e}")
+            
+    # --------- STOP (addr 10, toggle) ----------
+    def _toggle_stop(self):
+        if not self.is_connected or not self.client:
+            return
+        try:
+            # toggle
+            self.exec_stop_state = not self.exec_stop_state
 
+            self.client.set_bool_value(10, self.exec_stop_state)
+
+            # update button text
+            if self.exec_stop_state:
+                self.exec_stop_btn.config(text="STOP (On)")
+                self.status_var.set("🛑 STOP = True (Addr 10)")
+            else:
+                self.exec_stop_btn.config(text="STOP (Off)")
+                self.status_var.set("⬜ STOP = False (Addr 10)")
+
+        except Exception as e:
+            self.status_var.set(f"STOP toggle error: {e}")
+            
     # -------------------------------------------------------------------------
     def _toggle_power(self):
         if not self.is_connected or not self.client:
@@ -481,6 +570,7 @@ class MilConnApp:
         self.exec_vel_fwd_btn.config(state=state)
         self.exec_vel_bwd_btn.config(state=state)
         self.exec_halt_btn.config(state=state)
+        self.exec_stop_btn.config(state=state)
         self.root.update_idletasks()
 
     def _on_closing(self):
